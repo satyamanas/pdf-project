@@ -132,10 +132,12 @@ if uploaded_file is not None:
             | prompt
             | llm
             | StrOutputParser()
-        )
-    # STEP 13: ASK QUESTION
-   user_question = st.text_area("Ask Question: ")  
-    if user_question:  
-        if st.button("Get Answer"):  
-          with st.spinner('wait...'):
-            st.write_stream(rag_chain.stream(user_question))
+# STEP 13: ASK QUESTION
+user_question = st.text_area("Ask Question:")
+
+if user_question:
+    if st.button("Get Answer"):
+        with st.spinner("Wait..."):
+            st.write_stream(
+                rag_chain.stream(user_question)
+            )
