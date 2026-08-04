@@ -134,15 +134,8 @@ if uploaded_file is not None:
             | StrOutputParser()
         )
     # STEP 13: ASK QUESTION
-    user_question = st.text_area(
-        "Ask Question:",
-        placeholder="Ask something about your PDF..."
-    )
-    if st.button("Get Answer"):
-        if user_question.strip() == "":
-            st.warning("Please enter a question.")
-        else:
-            with st.spinner("Finding answer..."):
-                answer = rag_chain.invoke(user_question)
-       st.write(answer)
-        st.subheader("Answer")
+   user_question = st.text_area("Ask Question: ")  
+    if user_question:  
+        if st.button("Get Answer"):  
+          with st.spinner('wait...'):
+            st.write_stream(rag_chain.stream(user_question))
