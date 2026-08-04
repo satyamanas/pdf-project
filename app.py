@@ -1,124 +1,148 @@
 import os
+import streamlit as st
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-import streamlit as st
-import numpy
-import time
-from PIL import Image
 
-#=================step 2 : API KEYS =========================
-st.set_page_config(page_title = "chat-with-pdf",
-                   layout = 'wide')
-
-st.sidebar.title("SET API CONFIG")
+# STEP 1: PAGE CONFIGURATION
+st.set_page_config(
+    page_title="Chat With PDF",
+    page_icon="📚",
+    layout="wide"
+)
 st.title("RAG Based Chat With PDF 📚")
-GOOGLE_API_KEY = st.sidebar.text_input("GOOGLE_API_KEY",type = "password")
-os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
+
+# STEP 2: API KEY
+st.sidebar.title("SET API CONFIG")
+
+GOOGLE_API_KEY = st.sidebar.text_input(
+    "GOOGLE_API_KEY",
+    type="password"
+)
 
 if GOOGLE_API_KEY:
-  st.sidebar.success("API Key Loaded!!")
+    os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
+    st.sidebar.success("API Key Loaded!!")
 else:
-  st.sidebar.info("Give API Key")
-
-#===================STEP 3 LOAD PDF====================
-
-uploaded_file = stsidebar.file_uploaded("Upload PDF File", type = ["pdf"])
-
-if uploaded_file:
-  with st.spinner("Reading PDF File"):
-    data = uploaded_file.read()
-    st.sidebar.pdf(data)
-
-if uploaded_file is not None:  
-    save_dir = "pdf_files"  
-    if not os.path.exists(save_dir):  
-        os.makedirs(save_dir)  
+    st.sidebar.info("Enter your Google API Key")
   
-file_path = os.path.join(save_dir, uploaded_file.name)  
-with open(file_path, "wb") as f:  
-    f.write(uploaded_file.getbuffer())  
-  
-st.write(file_path)  
-#==================STEP 4 LOAD RESOURCES=====================
+# STEP 3: UPLOAD PDF
+uploaded_file = st.sidebar.file_uploader(
+    "Upload PDF File",
+    type=["pdf"]
+)
 
-@st.cache_data
-def load_documents():
-    loader = PyPDFLoader(file_path)
-    documents = loader.load()
-    return documents
 
-# st.cache_data: to load data only one time
-# st.cache_resource : to load resource only one time
+if uploaded_file is not None:
+    save_dir = "pdf_files"
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    file_path = os.path.join(
+        save_dir,
+        uploaded_file.name
+    )
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
 
-@st.cache_resource
-def load_embedding():
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    return embeddings
+    st.success(f"PDF uploaded: {uploaded_file.name}")
 
-@st.cache_data
-def get_splitted_chunks():
-  splitter = RecursiveCharacterTextSplitter(
-    chunk_size = 1000,
-    chunk_overlap = 200)
-  chunks = splitter.split_documnets(documents)
-  return chunks
+    # STEP 4: LOAD PDF
+    with st.spinner("Reading PDF..."):
+        loader = PyPDFLoader(file_path)
+        documents = loader.load()
+    st.success(f"PDF loaded successfully! Pages: {len(documents)}")
 
-#=============STEP 5 GET AND LOAD DOCS================
+    # STEP 5: SPLIT DOCUMENT INTO CHUNKS
+    with st.spinner("Splitting document into chunks..."):
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200
+        )
+        chunks = splitter.split_documents(documents)
+    st.success(f"Created {len(chunks)} chunks")
+    # STEP 6: CREATE EMBEDDINGS
+    with st.spinner("Loading embedding model..."):
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+    # STEP 7: CREATE VECTOR DATABASE
+    with st.spinner("Creating FAISS Vector Database..."):
+        vectorstore = FAISS.from_documents(
+            chunks,
+            embeddings
+        )
+    st.success("Vector database created successfully!")
+    # STEP 8: RETRIEVER
+    k_value = st.sidebar.slider(
+        "Select Top K-Value",
+        min_value=1,
+        max_value=10,
+        value=4
+    )
+    retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "k": k_value
+        }
+    )
 
-documents = load_documents()
-embeddings = load_embedding()
-chunks = get_splitted_chunks()
+    # STEP 9: GOOGLE GEMINI LLM
+    if not GOOGLE_API_KEY:
+        st.warning("Please enter your Google API Key in the sidebar.")
+        st.stop()
 
-@st.cache_data
-def create_vector_db(chunks,_embeddings):
-  # to build vector DB
-  vectorstore = FAISS.from_documents(chunks,_embeddings)
-  vectorstore.save_local("faiss_index")
-  return vectorstore
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=GOOGLE_API_KEY,
+        temperature=0
+    )
+    # STEP 10: PROMPT
+    prompt = ChatPromptTemplate.from_template(
+        """  Answer the question using ONLY the context below.
+        If the answer isn't in the context, say:
+        "I don't know based on the document."
+        Context:
+        {context}
+        Question:
+        {question}
+        """
+    )
 
-@st.cache_data
-def create_retriever(vectorstore, k_value):
-  retriever = _vecotrstore.as_retriever(search_kwargs("k": k_value))
-  return retriever
+    # STEP 11: FORMAT DOCUMENTS
+    def format_docs(docs):
+        return "\n\n".join(
+            doc.page_content
+            for doc in docs
+        )
 
-_vectorstore = create_vector_db(chunks, embeddings)
-k_slider = st.sidebar.slider("Select Top K-Value",min_value=1,max_value=10)
+    # STEP 12: CREATE RAG CHAIN
 
-retriever = create_retriever(vectorstore, k_slider)
-
-# ========================STEP 6: LCEL RAG CHAIN========================  
-llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash")  
-prompt = ChatPromptTemplate.from_template("""  
-Answer the question using ONLY the context below.  
-If the answer isn't in the context, say "I don't know based on the document."  
-  
-Context:  
-{context}  
-  
-Question: {question}  
-""")  
-  
-def format_docs(docs):  
-    # Join chunks of retrieved docs  
-    return "\n\n".join(doc.page_content for doc in docs)  
-  
-with st.spinner("Building RAG Chain"):  
-    rag_chain = (  
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}  
-        | prompt  
-        | llm  
-        | StrOutputParser()  
-    )  
-  
-# ========================GET USER INPUT========================  
-user_question = st.text_area("Ask Question: ")  
-if user_question:  
-    if st.button("Get Answer"):  
-      with st.spinner('wait...'):
-        st.write_stream(rag_chain.stream(user_question))
+    with st.spinner("Building RAG Chain..."):
+        rag_chain = (
+            {
+                "context": retriever | format_docs,
+                "question": RunnablePassthrough()
+            }
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+    # STEP 13: ASK QUESTION
+    user_question = st.text_area(
+        "Ask Question:",
+        placeholder="Ask something about your PDF..."
+    )
+    if st.button("Get Answer"):
+        if user_question.strip() == "":
+            st.warning("Please enter a question.")
+        else:
+            with st.spinner("Finding answer..."):
+                answer = rag_chain.invoke(user_question)
+       st.write(answer)
+            st.subheader("Answer")
